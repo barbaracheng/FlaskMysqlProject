@@ -6,7 +6,7 @@ from datetime import timedelta
 import os
 
 # 打开数据库连接
-db = pymysql.connect(host='127.0.0.1', user='root', password='123456', db='dbap')
+db = pymysql.connect(host='127.0.0.1', user='root', password='123456', db='dbap1')
 # 使用 cursor() 方法创建一个游标对象 cur
 cur = db.cursor()
 app = Flask(__name__)
@@ -101,22 +101,22 @@ def reserve():
     data = json.loads(request.get_data(as_text=True))
     itemName = data['itemname']   # 获取前端传回来的项目名称
     playdate = data['playdate']
-    sql = """select * from item where itemName='%s' """%itemName # 查询相应项目的信息
+    sql = """select * from project where projectName='%s' """%itemName  # 查询相应项目的信息
     cur.execute(sql)
-    item = cur.fetchone() # 存储查询的项目信息
-    item = list(item)
-    if item:
-        # 通过itemID连表查询ticketnum表的余票信息
-        cur.execute("""select leftNum from ticketnum,item 
-        where ticketnum.itemID = item.itemID and item.itemID='%s'"""%item[0])
+    project = cur.fetchone() # 存储查询的项目信息
+    project = list(project)
+    if project:
+        # 通过projectID连表查询用户选择的游玩日期当天的余票信息
+        cur.execute("""select leftNum from project_ticket,project 
+        where project.projectID = project_ticket.projectID and project.projectID='%s'"""%project[0])
         ticket = cur.fetchone()
         if ticket[0]>=0:   # 若余票大于0，则可以进行购票
             #sql1 = """select * from userinfo where username='%s'"""%username
             cur.execute("""select * from userinfo where userID='%d'"""%userid)
             user = cur.fetchone()
             user = list(user)
-            if user[4] >= item[3]:  # 判断用户余额是否足够买票
-                user[4]-=item[3]
+            if user[4] >= project[3]:  # 判断用户余额是否足够买票
+                user[4]-=project[3]
                 try:  # 更新用户余额
                     sql = """update userinfo set money='%f' where userID='%d'"""%(user[4],userid)
                     cur.execute(sql)
@@ -124,14 +124,14 @@ def reserve():
                     db.rollback()
                     return jsonify({'status':'error','msg':'更新用户余额失败','reason':e.__str__()})
                 try:  # 生成一条购票的记录
-                    sql = """insert into ticket(itemID,price,playdate,userID,reservetime,status) 
-                    values ('%s','%s','%s','%d', now(),'%s')"""%(item[0],item[3],playdate,userid,'pending')
+                    sql = """insert into record(projectID,playdate,userID,reservetime,status) 
+                    values ('%d','%s','%s', now(),'%s')"""%(project[0],playdate,userid,'pending')
                     cur.execute(sql)
                 except Exception as e:
                     db.rollback()
                     return jsonify({'status':'error','msg':'预订失败','reason':e.__str__()})
                 try:  # 更新项目的余票信息
-                    sql = """update ticketnum set leftnum=leftnum-1 where itemID='%s'""" % item[0]
+                    sql = """update project_ticket set leftnum=leftnum-1 where projectID='%d'""" % project[0]
                     cur.execute(sql)
                     db.commit()  # 如果以上sql语句执行都没有问题，则提交事务
                     return jsonify({'status': 'ok', 'msg': '预订成功'})
@@ -141,6 +141,8 @@ def reserve():
 
             else:
                 return jsonify({'status':'error','msg':'余额不足不能购票'})
+        else:
+            return jsonify({'status':'error','msg':'余票不足不能购票'})
     else:
         return jsonify({'status':'error','msg':'找不到项目信息'})
 
@@ -181,30 +183,32 @@ def cancel():
     data = json.loads(request.get_data(as_text=True))
     ticketID = data['ticketID']
     ticketID = int(ticketID)
-    cur.execute("""select * from ticket where ticketID='%d'"""%ticketID)
+    cur.execute("""select * from record where ticketID='%d'"""%ticketID)
     ticket = cur.fetchone()  # 获取用户的购票信息
     if not ticket:
         return jsonify({'status':'error','msg':'找不到购票信息'})
-    sql = """select ticketnum.itemID from ticketnum,ticket 
-    where ticketnum.itemID=ticket.itemID and ticketID='%d' and ticketnum.date=ticket.playdate"""%ticketID
-    cur.execute(sql)
-    itemID = cur.fetchone()
-    if not itemID:
+    sql = """select project_ticket.projectID from project_ticket,record 
+    where project_ticket.projectID=record.projectID and ticketID='%d' and project_ticket.date=record.playdate"""%ticketID
+    cur.execute(sql) # 根据票的信息查找对应日期的项目
+    projcetID = cur.fetchone()
+    if not projcetID:
         return jsonify({'status':'error','msg':'找不到对应的项目'})
     try:  # 更新剩余票数
-        cur.execute("""update ticketnum set leftNum=leftNum+1 where itemID='%d'"""%itemID[0])
+        cur.execute("""update project_ticket set leftNum=leftNum+1 where projectID='%d'"""%projcetID[0])
     except Exception as e:
         return jsonify({'status':'error','msg':'更新余票失败','reason':e.__str__()})
     try:
         cur.execute("""select * from userinfo where username='%s'"""%username)
-        user = cur.fetchone()
-        money = user[4]+ticket[2] # 更新用户的余额
+        user = cur.fetchone() # 查询的用户信息
+        cur.execute("""select price from project where projectID='%d'"""%projcetID[0])
+        price = cur.fetchone() # 查询票价
+        money = user[4]+price[0] # 更新用户的余额
         money = float(money)
         cur.execute("""update userinfo set money='%f' where username='%s' """%(money,username))
     except Exception as e:
         return jsonify({'status':'error','msg':'更新用户余额失败','reason':e.__str__()})
     try:  # 删除购票记录
-        cur.execute("""delete from ticket where ticketID='%d'"""%ticketID)
+        cur.execute("""delete from record where ticketID='%d'"""%ticketID)
         db.commit()
         return jsonify({'status':'ok','msg':'取消预订成功'})
     except Exception as e:
@@ -232,7 +236,7 @@ def additem():
         if price == '':
             return jsonify({'status':'error','msg':'项目价格为空'})
         try:
-            cur.execute("""insert into item(itemname,itemdescription,price) values('%s','%s','%f')"""%(itemname,itemdes,price))
+            cur.execute("""insert into project(projectname,projectdescription,price) values('%s','%s','%f')"""%(itemname,itemdes,price))
             db.commit()
             return jsonify({'status':'ok','msg':'添加项目成功'})
         except Exception as e:
@@ -246,7 +250,62 @@ def additem():
         return jsonify({'status':'error','msg':'未登录'})
 
 
+#删除项目
+@app.route('/drop_item', methods=['GET', 'POST'])
+def drop_item():
+    userid = session.get('userID')
+    if userid is None:
+        return jsonify({'status': 'error', 'msg': '用户未登录'})
+    sql="""select * from userinfo where userID='%d'""" % userid
+    cur.execute(sql)
+    user=cur.fetchone()
+    user=list(user)
+    if user[3]=='admin':
+        data = json.loads(request.get_data(as_text=True))
+        itemID = data['itemID']  # 获取前端传回来的票据ID
+        itemID = int(itemID)
+        sql = """select * from project where projectID='%d' """ % itemID  # 查询相应票据的信息
+        cur.execute(sql)
+        item = cur.fetchone()  # 存储查询的票据信息
+        item = list(item)
+        if item:
+            sql="""select * from record where projectID='%d' and status='pending'""" %item[0]
+            cur.execute(sql)
+            user1=cur.fetchone()
+            if user1 is None:
+                try:
+                    sql="""delete from project where projectID='%d'""" % item[0]
+                    cur.execute(sql)
+                    db.commit()
+                    return jsonify({'status': 'ok', 'msg': '删除项目成功!'})
+                except Exception as e:
+                    db.rollback()
+                    return jsonify({'status': 'error', 'msg': '删除项目失败', 'reason': e.__str__()})
+            else:
+                return jsonify({'status': 'ok', 'msg': "该项目有预定的未使用的票，无法进行删除！"})
 
+        else:
+            return jsonify({'status': 'ok', 'msg': "项目不存在，无法进行删除！"})
+    else:
+        return jsonify({'status': 'ok', 'msg': "您没有管理员权限，无法使用删除项目功能！"})
+
+
+#查询项目
+@app.route('/query_item', methods=['GET', 'POST'])
+def query_item():
+    userid = session.get('userID')
+    if userid is None:
+        return jsonify({'status': 'error', 'msg': '用户未登录'})
+    data = json.loads(request.get_data(as_text=True))
+    itemID = data['itemID']
+    itemID = int(itemID)
+    sql="""select * from project where projectID='%d'"""  % itemID
+    cur.execute(sql)
+    item=cur.fetchone()
+    if item:
+        return jsonify({'status':'ok','msg':'查询项目信息成功','data':item})
+    else:
+        return jsonify({'status': 'error', 'msg': '项目不存在，无法查询'})
 
 
 
