@@ -175,7 +175,42 @@ def update_user():
 # 取消预定
 @app.route('/cancel', methods=['GET', 'POST'])
 def cancel():
-    pass
+    username = session.get('username')
+    if username is None:
+        return jsonify({'status':'error','msg':'用户未登录'})
+    data = json.loads(request.get_data(as_text=True))
+    ticketID = data['ticketID']
+    ticketID = int(ticketID)
+    cur.execute("""select * from ticket where ticketID='%d'"""%ticketID)
+    ticket = cur.fetchone()  # 获取用户的购票信息
+    if not ticket:
+        return jsonify({'status':'error','msg':'找不到购票信息'})
+    sql = """select ticketnum.itemID from ticketnum,ticket 
+    where ticketnum.itemID=ticket.itemID and ticketID='%d' and ticketnum.date=ticket.playdate"""%ticketID
+    cur.execute(sql)
+    itemID = cur.fetchone()
+    if not itemID:
+        return jsonify({'status':'error','msg':'找不到对应的项目'})
+    try:  # 更新剩余票数
+        cur.execute("""update ticketnum set leftNum=leftNum+1 where itemID='%d'"""%itemID[0])
+    except Exception as e:
+        return jsonify({'status':'error','msg':'更新余票失败','reason':e.__str__()})
+    try:
+        cur.execute("""select * from userinfo where username='%s'"""%username)
+        user = cur.fetchone()
+        money = user[4]+ticket[2] # 更新用户的余额
+        money = float(money)
+        cur.execute("""update userinfo set money='%f' where username='%s' """%(money,username))
+    except Exception as e:
+        return jsonify({'status':'error','msg':'更新用户余额失败','reason':e.__str__()})
+    try:  # 删除购票记录
+        cur.execute("""delete from ticket where ticketID='%d'"""%ticketID)
+        db.commit()
+        return jsonify({'status':'ok','msg':'取消预订成功'})
+    except Exception as e:
+        db.rollback()
+        return jsonify({'status':'error','msg':'删除购票信息失败','reason':e.__str__()})
+
 
 
 # 管理员添加项目信息
@@ -203,6 +238,14 @@ def additem():
         except Exception as e:
             db.rollback()
             return jsonify({'status':'error','msg':'添加项目失败','reason':e.__str__()})
+    elif session.get('usertype') == 'user':
+        return jsonify({"status":'error','msg':'普通用户无权访问'})
+    elif session.get('usertype') != 'user' or session.get('usertype') == 'admin':
+        return jsonify({'status':'error','msg':'用户类型错误'})
+    else:
+        return jsonify({'status':'error','msg':'未登录'})
+
+
 
 
 
