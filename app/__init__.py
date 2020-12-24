@@ -4,9 +4,6 @@ from flask.templating import render_template
 import pymysql
 from datetime import timedelta
 import os
-#from flask_login import current_user,login_user,logout_user,login_required
-import functools
-from werkzeug.security import check_password_hash
 
 # 打开数据库连接
 db = pymysql.connect(host='127.0.0.1', user='root', password='123456', db='dbap')
@@ -32,7 +29,7 @@ def login():
     data = json.loads(request.get_data(as_text=True))
     username = data['username']
     password = data['password']
-    sql = """select username,password,type from userinfo where username='%s'""" % username
+    sql = """select * from userinfo where username='%s'""" % username
     cur.execute(sql)
     user = cur.fetchone()
     if user is None:
@@ -45,7 +42,9 @@ def login():
         session.clear()
         session['username'] = user[0]
         session['password'] = user[1]
-        session['usertype'] = user[2]
+        session['userID'] = user[2]
+        session['usertype'] = user[3]
+
         if usertype[0] == 'admin':  # 根据用户类型跳转
             return jsonify({'status': 'ok', 'msg': '游乐园管理员登陆成功！', 'currentAuthority': usertype[0]})
         if usertype[0] == 'user':
@@ -77,9 +76,15 @@ def registration():
                     sql = """insert into userinfo(username,password,type) values ('%s', '%s', '%s')""" %(username,password,usertype)
                     cur.execute(sql)
                     db.commit()  # 将获取的用户信息提交到数据库，userinfo表插入一条记录
+
+                    cur.execute("""select userID from userinfo where username='%s'"""%username)
+                    user = cur.fetchone()
+                    session['userID'] = user[0]
+                    db.close()
                     return jsonify({'status': 'ok', 'msg': '注册成功！'})
                 except Exception as e:
                     db.rollback()
+                    db.close()
                     return jsonify({'status': 'error', 'msg': '注册失败！'})
 
 
@@ -93,8 +98,8 @@ def logout():
 # 预订票
 @app.route('/resevation',methods=['GET','POST'])
 def reserve():
-    username = session.get('username')
-    if username is None:
+    userid = session.get('userID')
+    if userid is None:
         return jsonify({'status':'error','msg':'用户未登录'})
     data = json.loads(request.get_data(as_text=True))
     itemName = data['itemname']   # 获取前端传回来的项目名称
@@ -110,38 +115,69 @@ def reserve():
         ticket = cur.fetchone()
         if ticket[0]>=0:   # 若余票大于0，则可以进行购票
             #sql1 = """select * from userinfo where username='%s'"""%username
-            cur.execute("""select * from userinfo where username='%s'"""%username)
+            cur.execute("""select * from userinfo where userID='%d'"""%userid)
             user = cur.fetchone()
             user = list(user)
             if user[4] >= item[3]:  # 判断用户余额是否足够买票
                 user[4]-=item[3]
                 try:  # 更新用户余额
-                    sql = """update userinfo set money='%f' where username='%s'"""%(user[4],username)
+                    sql = """update userinfo set money='%f' where userID='%d'"""%(user[4],userid)
                     cur.execute(sql)
-                    db.commit()
                 except Exception as e:
                     db.rollback()
                     return jsonify({'status':'error','msg':'更新用户余额失败','reason':e})
                 try:  # 生成一条购票的记录
-                    sql = """insert into ticket(itemID,price,playdate,username,reservetime) 
-                    values ('%s','%s','%s','%s', now())"""%(item[0],item[3],playdate,username)
+                    sql = """insert into ticket(itemID,price,playdate,userID,reservetime,status) 
+                    values ('%s','%s','%s','%d', now(),'%s')"""%(item[0],item[3],playdate,userid,'pending')
                     cur.execute(sql)
-                    db.commit()
                 except Exception as e:
                     db.rollback()
                     return jsonify({'status':'error','msg':'预订失败','reason':e.__str__()})
                 try:  # 更新项目的余票信息
                     sql = """update ticketnum set leftnum=leftnum-1 where itemID='%s'""" % item[0]
                     cur.execute(sql)
-                    db.commit()
+                    db.commit()  # 如果以上sql语句执行都没有问题，则提交事务
+                    db.close()
                     return jsonify({'status': 'ok', 'msg': '预订成功'})
                 except Exception as e:
                     db.rollback()
+                    db.close()
                     return jsonify({'status':'error','msg':'预订失败','reason':e})
+
             else:
                 return jsonify({'status':'error','msg':'余额不足不能购票'})
     else:
         return jsonify({'status':'error','msg':'找不到项目信息'})
+
+
+# 修改用户名和密码
+@app.route('/updateuser',methods=['GET','POST'])
+def update_user():
+    username = session.get('username')
+    if username is None:
+        return jsonify({'status':'error','msg':'用户未登录'})
+    data = json.loads(request.get_data(as_text=True))
+    newname = data['username']
+    newpsd = data['password']
+    if newname =='':
+        return jsonify({'status':'error','msg':'用户名为空'})
+    if newpsd == '':
+        return jsonify({'status':'error','msg':'密码为空'})
+    # 用户名密码都不为空，则查询用户名是否重复
+    cur.execute("""select username from userinfo where username='%s'"""%newname)  # 查询名字是否重复
+    res = cur.fetchone()
+    if res:
+        return jsonify({'status':'error','msg':'用户名重复'})
+    try:
+        cur.execute("""update userinfo set username='%s',password='%s'"""%(newname, newpsd))
+        db.commit()
+        db.close()
+        return jsonify({'status':'ok','msg':'更新信息成功'})
+    except Exception as e:
+        db.rollback()
+        db.close()
+        return jsonify({'status':'error','msg':'更新信息失败'})
+
 
 
 
