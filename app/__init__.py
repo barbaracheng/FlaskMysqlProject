@@ -44,7 +44,6 @@ def login():
         session['password'] = user[1]
         session['userID'] = user[2]
         session['usertype'] = user[3]
-
         if usertype[0] == 'admin':  # 根据用户类型跳转
             return jsonify({'status': 'ok', 'msg': '游乐园管理员登陆成功！', 'currentAuthority': usertype[0]})
         if usertype[0] == 'user':
@@ -80,11 +79,9 @@ def registration():
                     cur.execute("""select userID from userinfo where username='%s'"""%username)
                     user = cur.fetchone()
                     session['userID'] = user[0]
-                    db.close()
                     return jsonify({'status': 'ok', 'msg': '注册成功！'})
                 except Exception as e:
                     db.rollback()
-                    db.close()
                     return jsonify({'status': 'error', 'msg': '注册失败！'})
 
 
@@ -125,7 +122,7 @@ def reserve():
                     cur.execute(sql)
                 except Exception as e:
                     db.rollback()
-                    return jsonify({'status':'error','msg':'更新用户余额失败','reason':e})
+                    return jsonify({'status':'error','msg':'更新用户余额失败','reason':e.__str__()})
                 try:  # 生成一条购票的记录
                     sql = """insert into ticket(itemID,price,playdate,userID,reservetime,status) 
                     values ('%s','%s','%s','%d', now(),'%s')"""%(item[0],item[3],playdate,userid,'pending')
@@ -137,12 +134,10 @@ def reserve():
                     sql = """update ticketnum set leftnum=leftnum-1 where itemID='%s'""" % item[0]
                     cur.execute(sql)
                     db.commit()  # 如果以上sql语句执行都没有问题，则提交事务
-                    db.close()
                     return jsonify({'status': 'ok', 'msg': '预订成功'})
                 except Exception as e:
                     db.rollback()
-                    db.close()
-                    return jsonify({'status':'error','msg':'预订失败','reason':e})
+                    return jsonify({'status':'error','msg':'预订失败','reason':e.__str__()})
 
             else:
                 return jsonify({'status':'error','msg':'余额不足不能购票'})
@@ -171,12 +166,43 @@ def update_user():
     try:
         cur.execute("""update userinfo set username='%s',password='%s'"""%(newname, newpsd))
         db.commit()
-        db.close()
         return jsonify({'status':'ok','msg':'更新信息成功'})
     except Exception as e:
         db.rollback()
-        db.close()
-        return jsonify({'status':'error','msg':'更新信息失败'})
+        return jsonify({'status':'error','msg':'更新信息失败','reason':e.__str__()})
+
+
+# 取消预定
+@app.route('/cancel', methods=['GET', 'POST'])
+def cancel():
+    pass
+
+
+# 管理员添加项目信息
+@app.route('/additem',methods=['GET','POST'])
+def additem():
+    if session.get('usertype') == 'admin':
+        data = json.loads(request.get_data(as_text=True))
+        itemname = data['itemname']
+        itemdes = data['description']
+        price = data['price']
+        try:
+            price = float(price)
+        except Exception as e:
+            return jsonify({'status':'error','msg':'数据类型不正确','reason':e.__str__()})
+        if itemname == '':
+            return jsonify({'status':'error','msg':'项目名称为空'})
+        if itemdes == '':
+            return jsonify({'status':'error','msg':'项目描述为空'})
+        if price == '':
+            return jsonify({'status':'error','msg':'项目价格为空'})
+        try:
+            cur.execute("""insert into item(itemname,itemdescription,price) values('%s','%s','%f')"""%(itemname,itemdes,price))
+            db.commit()
+            return jsonify({'status':'ok','msg':'添加项目成功'})
+        except Exception as e:
+            db.rollback()
+            return jsonify({'status':'error','msg':'添加项目失败','reason':e.__str__()})
 
 
 
