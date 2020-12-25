@@ -216,27 +216,29 @@ def cancel():
         return jsonify({'status':'error','msg':'删除购票信息失败','reason':e.__str__()})
 
 
-
 # 管理员添加项目信息
 @app.route('/additem',methods=['GET','POST'])
 def additem():
     if session.get('usertype') == 'admin':
         data = json.loads(request.get_data(as_text=True))
-        itemname = data['itemname']
-        itemdes = data['description']
+        projectname = data['projectname']
+        projectdes = data['description']
         price = data['price']
         try:
             price = float(price)
         except Exception as e:
             return jsonify({'status':'error','msg':'数据类型不正确','reason':e.__str__()})
-        if itemname == '':
+        if projectname == '':
             return jsonify({'status':'error','msg':'项目名称为空'})
-        if itemdes == '':
+        if projectdes == '':
             return jsonify({'status':'error','msg':'项目描述为空'})
         if price == '':
             return jsonify({'status':'error','msg':'项目价格为空'})
+        cur.execute("""select projectName from project where projectName='%s'""" % projectname)
+        if cur.fetchone() is not None:
+            return jsonify({'status': 'error', 'msg': '项目名称重复'})
         try:
-            cur.execute("""insert into project(projectname,projectdescription,price) values('%s','%s','%f')"""%(itemname,itemdes,price))
+            cur.execute("""insert into project(projectname,projectdescription,price) values('%s','%s','%f')"""%(projectname,projectdes,price))
             db.commit()
             return jsonify({'status':'ok','msg':'添加项目成功'})
         except Exception as e:
@@ -244,13 +246,13 @@ def additem():
             return jsonify({'status':'error','msg':'添加项目失败','reason':e.__str__()})
     elif session.get('usertype') == 'user':
         return jsonify({"status":'error','msg':'普通用户无权访问'})
-    elif session.get('usertype') != 'user' or session.get('usertype') == 'admin':
+    elif session.get('usertype') != 'user' or session.get('usertype') != 'admin':
         return jsonify({'status':'error','msg':'用户类型错误'})
     else:
         return jsonify({'status':'error','msg':'未登录'})
 
 
-#删除项目
+# 删除项目
 @app.route('/drop_item', methods=['GET', 'POST'])
 def drop_item():
     userid = session.get('userID')
@@ -262,11 +264,11 @@ def drop_item():
     user=list(user)
     if user[3]=='admin':
         data = json.loads(request.get_data(as_text=True))
-        itemID = data['itemID']  # 获取前端传回来的票据ID
-        itemID = int(itemID)
-        sql = """select * from project where projectID='%d' """ % itemID  # 查询相应票据的信息
+        projectID = data['projectID']  # 获取前端传回来的项目ID
+        projectID = int(projectID)
+        sql = """select * from project where projectID='%d' """ % projectID  # 查询相应项目的信息
         cur.execute(sql)
-        item = cur.fetchone()  # 存储查询的票据信息
+        item = cur.fetchone()  # 存储查询的项目信息
         item = list(item)
         if item:
             sql="""select * from record where projectID='%d' and status='pending'""" %item[0]
@@ -297,16 +299,69 @@ def query_item():
     if userid is None:
         return jsonify({'status': 'error', 'msg': '用户未登录'})
     data = json.loads(request.get_data(as_text=True))
-    itemID = data['itemID']
-    itemID = int(itemID)
-    sql="""select * from project where projectID='%d'"""  % itemID
+    prjectID = data['projectID']
+    prjectID = int(prjectID)
+    sql="""select * from project where projectID='%d'"""  % prjectID
     cur.execute(sql)
     item=cur.fetchone()
     if item:
-        return jsonify({'status':'ok','msg':'查询项目信息成功','data':item})
+        return jsonify({'status':'ok','msg':'查询项目信息成功','projectID':item[0],
+                        'projectName':item[1],'projectDescription':item[2],'price':item[3]})
     else:
         return jsonify({'status': 'error', 'msg': '项目不存在，无法查询'})
 
+
+# 查询个人信息
+@app.route('/personal_info',methods=['GET'])
+def personal_info():
+    username = session.get('username')
+    if username is None:
+        return jsonify({'status':'error','msg':'用户未登录'})
+    cur.execute("""select * from userinfo where username='%s'"""%username)
+    user = cur.fetchone()
+    if user is None:
+        return jsonify({'status':'error','msg':'找不到该用户信息'})
+    return jsonify({'status':'ok','msg':'查询成功','username':user[0],'userID':user[2],'usertype':user[3],'money':user[4],'email':user[5]})
+
+
+# 添加门票信息
+@app.route('/add_ticket',methods=['GET','POST'])
+def add_ticket():
+    username = session.get('username')
+    if username is None:
+        return jsonify({'status':'error','msg':'用户未登录'})
+    cur.execute("""select type from userinfo where username='%s'"""%username)
+    usertype = cur.fetchone()
+    if usertype[0] == 'admin':
+        data = json.loads(request.get_data(as_text=True))
+        projectName = data['projectname']
+        date = data['date']
+        total_num = data['totalNum']
+        total_num = int(total_num)
+        if date == '' or date is None:
+            return jsonify({'status':'error','msg':'日期不能为空'})
+        if total_num == '' or total_num is None:
+            return jsonify({'status':'error','msg':'总票数不能为空'})
+        # 查询项目表中是否有对应的项目ID
+        cur.execute("""select project.projectID from project,project_ticket 
+                where project.projectID=project_ticket.projectID and projectName='%s'""" % projectName)
+        projectID = cur.fetchone()
+        if projectID is None:
+            return jsonify({'status':'error','msg':'没有对应的项目，不能添加门票信息'})
+        cur.execute("""select date from project_ticket where date='%s' """%date)
+        res = cur.fetchone()
+        if res:
+            return jsonify({'status':'error','msg':'该项目当天的门票已经存在了'})
+        try:
+            cur.execute("""insert into project_ticket(projectID,date,totalNum,leftNum)
+             values('%d','%s','%d','%d')"""%(projectID[0],date,total_num,total_num))
+            db.commit()
+            return jsonify({'status':'ok','msg':'添加门票信息成功','projectID':projectID[0],'date':date,'total_num':total_num,'left_num':total_num})
+        except Exception as e:
+            db.rollback()
+            return jsonify({'status':'error','msg':'添加门票失败','reason':e.__str__()})
+    else:
+        return jsonify({'status':'error','msg':'您不是管理员，没有该权限'})
 
 
 
