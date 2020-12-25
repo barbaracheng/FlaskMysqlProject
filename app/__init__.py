@@ -292,7 +292,7 @@ def drop_item():
         return jsonify({'status': 'ok', 'msg': "您没有管理员权限，无法使用删除项目功能！"})
 
 
-#查询项目
+# 查询项目
 @app.route('/query_item', methods=['GET', 'POST'])
 def query_item():
     userid = session.get('userID')
@@ -300,7 +300,10 @@ def query_item():
         return jsonify({'status': 'error', 'msg': '用户未登录'})
     data = json.loads(request.get_data(as_text=True))
     prjectID = data['projectID']
-    prjectID = int(prjectID)
+    try:
+        prjectID = int(prjectID)
+    except Exception as e:
+        return jsonify({'status':'error','msg':'数据类型不正确','reason':e.__str__()})
     sql="""select * from project where projectID='%d'"""  % prjectID
     cur.execute(sql)
     item=cur.fetchone()
@@ -363,6 +366,50 @@ def add_ticket():
     else:
         return jsonify({'status':'error','msg':'您不是管理员，没有该权限'})
 
+
+# 修改项目门票信息
+@app.route('/update_pro',methods=['GET','POST'])
+def update_pro():
+    username = session.get('username')
+    if username is None:
+        return jsonify({'status': 'error', 'msg': '用户未登录'})
+    cur.execute("""select type from userinfo where username='%s'"""%username)
+    usertype = cur.fetchone()
+    if usertype[0] == 'admin':
+        data = json.loads(request.get_data(as_text=True))
+        projectID = data['projectID']
+        try:
+            projectID = int(projectID)
+        except Exception as e:
+            return jsonify({'status':'error','msg':'数据类型不正确','reason':e.__str__()})
+        date = data['date']
+        totalnum = data['totalnum']
+        try:
+            totalnum = int(totalnum)
+        except Exception as e:
+            return jsonify({'status': 'error', 'msg': '数据类型不正确', 'reason': e.__str__()})
+        count = cur.execute("""select date from record,project_ticket where 
+        date=playdate and project_ticket.projectID=record.projectID 
+        and date='%s' and record.projectID='%d' and status='%s'"""%(date,projectID,'pending'))
+        #return jsonify({'1':totalnum,'2':totalnum-count})
+        try:
+            cur.execute("""update project_ticket set totalNum='%d',leftNum='%d' 
+            where projectID='%d' and date='%s'"""%(totalnum,totalnum-count,projectID,date))
+            #cur.execute("""update project_ticket set leftNum='%d' where projectID='%d' and date='%s'"""%(totalnum-count,projectID,date))
+            db.commit()
+            return jsonify({'status':'ok','msg':'修改项目门票信息成功'})
+        except Exception as e:
+            db.rollback()
+            return jsonify({'status':'error','msg':'修改项目门票失败','reason':e.__str__()})
+    else:
+        return jsonify({'status':'error','msg':'不是管理员，没有该权限'})
+
+
+# 显示所有项目
+
+
+
+# 显示所有购票记录
 
 
 
