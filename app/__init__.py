@@ -406,15 +406,81 @@ def update_pro():
 
 
 # 显示所有项目
+@app.route('/display_project',methods=['GET'])
+def display_project():
+    username = session.get('username')
+    if username is None:
+        return jsonify({'status': 'error', 'msg': '用户未登录'})
+    cur.execute("""select type from userinfo where username='%s'"""%username)
+    usertype = cur.fetchone()
+    if usertype[0] == 'admin':
+        count = cur.execute("""select project.projectID,projectName,projectDescription,price,date,
+        totalNum,leftNum from project,project_ticket where project.projectID=project_ticket.projectID""")
+        res = cur.fetchall()
+        result = []
+        for i in range(count):
+            temp={}
+            temp['projectID'] = res[i][0]
+            temp['projectName'] = res[i][1]
+            temp['projectDescripton'] = res[i][2]
+            temp['price'] = res[i][3]
+            temp['date'] = res[i][4]
+            temp['totalNum'] = res[i][5]
+            temp['leftNum'] = res[i][6]
+            result.append(temp)
+        return jsonify({'status':'ok','msg':'查询所有项目成功','data':result})
+    #cur.execute("""select * from project,project_ticket where """)
+
+
+# 显示用户购票记录
+@app.route('/user_record',methods=['GET'])
+def display_record():
+    username = session.get('username')
+    if username is None:
+        return jsonify({'status': 'error', 'msg': '用户未登录'})
+    count = cur.execute("""select ticketID,projectName,playdate,userID,reservetime,status
+     from record,project where record.projectID=project.projectID and username='%s'"""%username)
+    record = cur.fetchall()
+    record_list=[]
+    for i in range(count):
+        temp = {}
+        temp['ticketID'] = record[i][0]
+        temp['projectName'] = record[i][1]
+        temp['playdate'] = record[i][2]
+        temp['userID'] = record[i][3]
+        temp['reservetime'] = record[i][4]
+        temp['status'] = record[i][5]
+        record_list.append(temp)
+    return jsonify({'status':'ok','msg':'查询个人购票信息成功','data':record_list})
 
 
 
 # 显示所有购票记录
-
-
-
+@app.route('/display_record',methods=['GET'])
+def display_user_record():
+    username = session.get('username')
+    if username is None:
+        return jsonify({'status': 'error', 'msg': '用户未登录'})
+    cur.execute("""select type from userinfo where username='%s'"""%username)
+    usertype = cur.fetchone()
+    if usertype == 'admin':
+        count = cur.execute("""select * from record""")
+        records = cur.fetchall()
+        records_list = []
+        for i in range(count):
+            temp = []
+            temp['ticketID'] = records[i][0]
+            temp['projectID'] = records[i][1]
+            temp['playdate'] = records[i][2]
+            temp['userID'] = records[i][3]
+            temp['reservetime'] = records[i][4]
+            temp['status'] = records[i][5]
+            records_list.append(temp)
+        return jsonify({'status':'ok','msg':'查询所有购票记录成功','data':records_list})
+    else:
+        return jsonify({'status':'error','msg':'您不是管理员，没有该权限'})
 
 
 # web 服务器
 if __name__ == '__main__':
-    app.run('127.0.0.1', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)
